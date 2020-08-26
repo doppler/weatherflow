@@ -7,6 +7,13 @@
     }
   },
   "watcher": {
-    "skip": [".vscode", "data.json", "denon.json", ".git", "client.ts"]
+    "skip": [
+      ".vscode",
+      "data.json",
+      "denon.json",
+      ".git",
+      "client.ts",
+      "public/*"
+    ]
   }
 }
