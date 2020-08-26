@@ -23,8 +23,6 @@ try {
 
 data = JSON.parse(jsonText);
 
-console.log(data);
-
 const ws: WebSocket = new WebSocket(endpoint);
 
 ws.on("open", function () {
