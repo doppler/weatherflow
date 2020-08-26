@@ -1,12 +1,18 @@
-import { config, WebSocket } from "./deps.ts";
+import {
+  config,
+  v4,
+  WebSocket,
+  listenAndServe,
+  acceptWebSocket,
+  acceptable,
+  isWebSocketCloseEvent,
+} from "./deps.ts";
 import { WfData, WfMessageObj } from "./types.d.ts";
 const ENV = config();
 
 // used to truncate data length
 const MAX_RAPID_WIND_ENTRIES = 60 * 5 / 3;
 const MAX_OBS_ST_ENTRIES = 5;
-
-console.log(ENV);
 
 const endpoint =
   `wss://ws.weatherflow.com/swd/data?api_key=${ENV.WEATHERFLOW_API_KEY}`;
@@ -24,17 +30,28 @@ try {
 } catch (e) {
   console.log("data.json did not exist");
 }
-
 data = JSON.parse(jsonText);
 
-const ws: WebSocket = new WebSocket(endpoint);
+const clientsMap = new Map();
 
-ws.on("open", function () {
-  console.log("ws connected!");
+const sendMessage = (message: any) => {
+  clientsMap.forEach((client) => {
+    try {
+      client.ws.send(JSON.stringify(message));
+    } catch (e) {
+      console.log(`client gone. removing ${client.clientId}`);
+      clientsMap.delete(client.clientId);
+    }
+  });
+};
+const wsClient: WebSocket = new WebSocket(endpoint);
+
+wsClient.on("open", function () {
+  console.log("wsClient connected!");
   sendStartRequests();
 });
 
-ws.on("message", async function (message: string) {
+wsClient.on("message", async function (message: string) {
   const messageObj: WfMessageObj = JSON.parse(message);
   console.log(messageObj);
   switch (messageObj.type) {
@@ -42,11 +59,14 @@ ws.on("message", async function (message: string) {
       data.rapid_wind.push(messageObj.ob);
       data.rapid_wind.length > MAX_RAPID_WIND_ENTRIES &&
         data.rapid_wind.shift();
+      sendMessage({ rapid_wind: data.rapid_wind });
       break;
     case "obs_st":
       data.obs_st.push(messageObj.obs[0]);
       data.obs_st.length > MAX_OBS_ST_ENTRIES && data.obs_st.shift();
+      sendMessage({ obs_st: data.obs_st });
       data.summary = messageObj.summary;
+      sendMessage({ summary: data.summary });
     default:
       break;
   }
@@ -54,14 +74,66 @@ ws.on("message", async function (message: string) {
 });
 
 const sendStartRequests = (): void => {
-  ws.send(
-    `{ "type":"listen_rapid_start", "device_id":77988, "id":"${
-      Math.round(Math.random() * 1000000000)
-    }" }`,
-  );
-  ws.send(
-    `{ "type":"listen_start", "device_id":77988, "id":"${
-      Math.round(Math.random() * 1000000000)
-    }" }`,
-  );
+  const device_id = ENV.WEATHERFLOW_DEVICE_ID;
+  wsClient.send(JSON.stringify({
+    device_id,
+    type: "listen_rapid_start",
+    id: v4.generate(),
+  }));
+  wsClient.send(JSON.stringify({
+    device_id,
+    type: "listen_start",
+    id: v4.generate(),
+  }));
 };
+
+const handleWs = async (ws: any) => {
+  let clientId = v4.generate();
+
+  for await (let message of ws) {
+    const event = typeof message === "string" ? JSON.parse(message) : message;
+    console.log(message);
+    if (event.join) {
+      console.log(`adding ${clientId}`);
+      clientsMap.set(clientId, {
+        clientId,
+        ws,
+      });
+      const { summary, obs_st, rapid_wind } = data;
+      sendMessage({ summary, obs_st, rapid_wind });
+    }
+  }
+};
+
+listenAndServe({ port: 3001 }, async (req) => {
+  let body = "";
+  switch (req.url) {
+    case "/":
+      req.respond({ body: "hello" });
+      break;
+    case "/favicon.ico":
+      body = await Deno.readTextFile("./favicon.svg");
+      let headers = new Headers();
+      headers.set("content-type", "image/svg+xml");
+      req.respond({ body, headers });
+      break;
+    case "/ws":
+      if (acceptable(req)) {
+        acceptWebSocket({
+          conn: req.conn,
+          bufReader: req.r,
+          bufWriter: req.w,
+          headers: req.headers,
+        }).then(handleWs);
+      }
+      break;
+    default:
+      body = `${req.url}: not found`;
+      try {
+        body = await Deno.readTextFile(`.${req.url}`);
+      } catch (e) {
+        console.error(body, e);
+      }
+      req.respond({ body });
+  }
+});
