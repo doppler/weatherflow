@@ -2,6 +2,10 @@ import { config, WebSocket } from "./deps.ts";
 import { WfData, WfMessageObj } from "./types.d.ts";
 const ENV = config();
 
+// used to truncate data length
+const MAX_RAPID_WIND_ENTRIES = 60 * 5 / 3;
+const MAX_OBS_ST_ENTRIES = 5;
+
 console.log(ENV);
 
 const endpoint =
@@ -36,9 +40,12 @@ ws.on("message", async function (message: string) {
   switch (messageObj.type) {
     case "rapid_wind":
       data.rapid_wind.push(messageObj.ob);
+      data.rapid_wind.length > MAX_RAPID_WIND_ENTRIES &&
+        data.rapid_wind.shift();
       break;
     case "obs_st":
       data.obs_st.push(messageObj.obs[0]);
+      data.obs_st.length > MAX_OBS_ST_ENTRIES && data.obs_st.shift();
       data.summary = messageObj.summary;
     default:
       break;
