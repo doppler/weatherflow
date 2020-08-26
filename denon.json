@@ -1,0 +1,12 @@
+{
+  "$schema": "https://deno.land/x/denon/schema.json",
+  "scripts": {
+    "start": {
+      "cmd": "deno run --allow-net --allow-read --allow-write --unstable index.ts",
+      "desc": "run my app.ts file"
+    }
+  },
+  "watcher": {
+    "skip": [".vscode", "data.json", "denon.json", ".git"]
+  }
+}
